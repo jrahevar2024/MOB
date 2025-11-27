@@ -10,13 +10,20 @@ import {
   CheckCircle, 
   XCircle, 
   AlertCircle,
-  StopCircle
+  StopCircle,
+  LogOut,
+  User as UserIcon
 } from 'lucide-react';
+import LoginPage from './LoginPage';
 import './App.css';
 
 const API_BASE_URL = 'http://localhost:5000';
 
 function App() {
+  // Authentication state
+  const [user, setUser] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -39,15 +46,28 @@ function App() {
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   
+  // Check authentication on mount
+  useEffect(() => {
+    const storedUser = localStorage.getItem('user');
+    const storedToken = localStorage.getItem('authToken');
+    
+    if (storedUser && storedToken) {
+      setUser(JSON.parse(storedUser));
+      setIsAuthenticated(true);
+    }
+  }, []);
+  
   // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
   
-  // Check API health on mount
+  // Check API health on mount (only if authenticated)
   useEffect(() => {
-    checkAPIHealth();
-  }, []);
+    if (isAuthenticated) {
+      checkAPIHealth();
+    }
+  }, [isAuthenticated]);
   
   const checkAPIHealth = async () => {
     try {
@@ -240,6 +260,22 @@ function App() {
     setUploadedFiles([]);
   };
   
+  const handleLogin = (userData) => {
+    setUser(userData);
+    setIsAuthenticated(true);
+  };
+  
+  const handleLogout = () => {
+    localStorage.removeItem('user');
+    localStorage.removeItem('authToken');
+    setUser(null);
+    setIsAuthenticated(false);
+    setMessages([]);
+    setUploadedFiles([]);
+    setBackendUrl(null);
+    setFrontendUrl(null);
+  };
+  
   const renderMessage = (message, index) => {
     const isUser = message.role === 'user';
     const isSystem = message.role === 'system';
@@ -297,10 +333,25 @@ function App() {
     });
   };
   
+  // Show login page if not authenticated
+  if (!isAuthenticated) {
+    return <LoginPage onLogin={handleLogin} />;
+  }
+  
   return (
     <div className="app">
       {/* Sidebar */}
       <div className="sidebar">
+        <div className="user-profile">
+          <div className="user-avatar">
+            <UserIcon size={24} />
+          </div>
+          <div className="user-info">
+            <div className="user-name">{user?.username || 'User'}</div>
+            <div className="user-email">{user?.email || 'user@example.com'}</div>
+          </div>
+        </div>
+        
         <h2>🤖 Mother of Bots</h2>
         <p style={{ fontSize: '0.9rem', color: '#666' }}>Multi-Agent Chat Interface</p>
         
@@ -370,8 +421,11 @@ function App() {
         )}
         
         <div style={{ marginTop: 'auto' }}>
-          <button className="btn btn-secondary" style={{ width: '100%' }} onClick={resetConversation}>
+          <button className="btn btn-secondary" style={{ width: '100%', marginBottom: '10px' }} onClick={resetConversation}>
             <RefreshCw size={16} /> Reset Conversation
+          </button>
+          <button className="btn btn-danger" style={{ width: '100%' }} onClick={handleLogout}>
+            <LogOut size={16} /> Logout
           </button>
         </div>
       </div>
