@@ -5,7 +5,7 @@ import asyncio
 import time
 import uuid
 from dotenv import load_dotenv
-from langchain_community.llms import Ollama
+from langchain_google_vertexai import ChatVertexAI
 from agents.requirements_analyzer import analyze_requirements, analyze_and_format_for_code_generation
 from agents.code_generation_agent import StandaloneCodeGenerationAgent
 
@@ -16,9 +16,10 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Ollama configuration
-OLLAMA_BASE_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "deepseek-r1:latest")
+# Vertex AI / Gemini configuration
+GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "motherofbots")
+GCP_LOCATION = os.getenv("GCP_LOCATION", "us-central1")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 # Removed SPADE UserInteractionAgent - using FastAPI instead
 
@@ -34,25 +35,55 @@ class StandaloneUserInteractionAgent:
         self.response_timestamps = {}  # Track when responses were generated
         logger.info(f"Standalone Agent {self.name} initialized")
         
+    def _create_system_prompt(self):
+        """Create a system prompt for general interactions"""
+        return """You are an expert software development assistant specializing in building full-stack web applications.
+
+Your role is to help users:
+1. Define and refine their application requirements
+2. Suggest best practices for implementation
+3. Explain technical concepts clearly
+4. Guide them through the development process
+
+When responding:
+- Be concise but thorough
+- Provide actionable advice
+- Use examples when helpful
+- Consider both backend (Python/FastAPI) and frontend (React/TailwindCSS) perspectives
+- Focus on modern, production-ready solutions
+
+Technical Stack Context:
+- Backend: Python, FastAPI, SQLAlchemy (async), Pydantic
+- Frontend: React, TailwindCSS, JavaScript
+- Database: SQLite (default), PostgreSQL (production)
+- API Style: RESTful with proper HTTP status codes"""
+
     async def generate_response(self, prompt):
-        """Generate response using LangChain Ollama LLM"""
+        """Generate response using LangChain Vertex AI with Gemini"""
         logger.info(f"Generating response for prompt: {prompt[:30]}...")
         
         try:
-            # Use LangChain Ollama LLM
-            logger.info(f"[LangChain] Initializing Ollama LLM via LangChain for user interaction (model: {OLLAMA_MODEL})")
-            llm = Ollama(
-                model=OLLAMA_MODEL,
-                base_url=OLLAMA_BASE_URL
+            # Use LangChain Vertex AI with Gemini
+            logger.info(f"[LangChain] Initializing Gemini via Vertex AI for user interaction (model: {GEMINI_MODEL})")
+            llm = ChatVertexAI(
+                model=GEMINI_MODEL,
+                project=GCP_PROJECT_ID,
+                location=GCP_LOCATION,
+                temperature=0.3  # Balanced temperature for helpful responses
             )
             
-            logger.info(f"[LangChain] Invoking response generation via LangChain ainvoke() at: {OLLAMA_BASE_URL}")
+            # Construct full prompt with system context
+            system_prompt = self._create_system_prompt()
+            full_prompt = f"{system_prompt}\n\n---\n\n{prompt}"
+            
+            logger.info(f"[LangChain] Invoking response generation via Vertex AI ainvoke()")
             # Invoke asynchronously using LangChain
-            response = await llm.ainvoke(prompt)
-            logger.info(f"[LangChain] Response generation completed via LangChain ({len(response)} chars)")
-            return response.strip()
+            response = await llm.ainvoke(full_prompt)
+            response_text = response.content if hasattr(response, 'content') else str(response)
+            logger.info(f"[LangChain] Response generation completed via Vertex AI ({len(response_text)} chars)")
+            return response_text.strip()
         except Exception as e:
-            error_msg = f"Error communicating with Ollama: {str(e)}"
+            error_msg = f"Error communicating with Vertex AI: {str(e)}"
             logger.error(error_msg)
             return error_msg
     
@@ -123,11 +154,22 @@ class StandaloneUserInteractionAgent:
                         logger.info(f"Requirements analysis: {requirements_analysis[:100]}...")
                         
                         # Step 3: Generate response based on analyzed requirements and original input
-                        enhanced_prompt = f"""Original user input: {message["content"]}
-                        
-Requirements analysis: {requirements_analysis}
+                        enhanced_prompt = f"""## User Request
+{message["content"]}
 
-Based on the above requirements, please provide a helpful response:"""
+## Analyzed Requirements
+{requirements_analysis}
+
+## Your Task
+Based on the user's request and the analyzed requirements above, provide a helpful and actionable response.
+
+Consider:
+1. What specific information or guidance does the user need?
+2. Are there any clarifying questions you should ask?
+3. Can you provide concrete next steps or recommendations?
+4. If discussing implementation, reference the appropriate tech stack (FastAPI backend, React frontend)
+
+Provide a clear, well-structured response that directly addresses the user's needs."""
                         
                         # Generate response with enhanced prompt
                         response = await self.generate_response(enhanced_prompt)
@@ -192,8 +234,8 @@ Based on the above requirements, please provide a helpful response:"""
     async def start(self):
         """Start the agent"""
         logger.info(f"Starting agent {self.name}")
-        logger.info(f"Using Ollama model: {OLLAMA_MODEL}")
-        logger.info(f"Endpoint: {OLLAMA_BASE_URL}")
+        logger.info(f"Using Gemini model: {GEMINI_MODEL} via Vertex AI")
+        logger.info(f"Project: {GCP_PROJECT_ID}, Location: {GCP_LOCATION}")
         
         self.running = True
         # Start message processing task

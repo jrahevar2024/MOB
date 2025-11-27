@@ -1,13 +1,13 @@
 """
-FastAPI application for Mother of Bots agents
+Flask application for Mother of Bots agents
 Replaces SPADE with REST API endpoints
 """
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Dict, Any, Optional, Union
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 import logging
 import os
+import asyncio
+import traceback
 from dotenv import load_dotenv
 
 # Import standalone agents
@@ -24,373 +24,348 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI app
-app = FastAPI(
-    title="Mother of Bots API",
-    description="REST API for multi-agent code generation system using LangChain",
-    version="1.0.0"
-)
+# Initialize Flask app
+app = Flask(__name__)
+app.config['JSON_SORT_KEYS'] = False
 
-# Add CORS middleware to allow Streamlit to call the API
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # In production, specify exact origins
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Add CORS to allow Streamlit to call the API
+CORS(app, resources={r"/*": {"origins": "*"}})
 
-# Pydantic models for request/response
-class RequirementsRequest(BaseModel):
-    message: str
-    output_format: str = "text"  # "text" or "json"
 
-class CodeGenerationRequest(BaseModel):
-    requirements: Union[str, Dict[str, Any]]
+def run_async(coro):
+    """Helper to run async functions in sync Flask context"""
+    return asyncio.run(coro)
 
-class UIGenerationRequest(BaseModel):
-    requirements: Union[str, Dict[str, Any]]
-
-class IntegrationRequest(BaseModel):
-    backend_code: str
-    ui_code: str
-    requirements: Optional[Dict[str, Any]] = None
-
-class DeploymentRequest(BaseModel):
-    project_dir: str
 
 # Health check endpoint
-@app.get("/")
-async def root():
+@app.route("/", methods=["GET"])
+def root():
     """Health check endpoint"""
-    return {
+    return jsonify({
         "status": "healthy",
         "service": "Mother of Bots API",
         "version": "1.0.0",
-        "framework": "FastAPI",
+        "framework": "Flask",
         "llm_framework": "LangChain"
-    }
+    })
 
-@app.get("/health")
-async def health():
+
+@app.route("/health", methods=["GET"])
+def health():
     """Detailed health check"""
-    return {
+    return jsonify({
         "status": "healthy",
         "langchain": "active",
-        "ollama_url": os.getenv("OLLAMA_URL", "http://localhost:11434"),
-        "ollama_model": os.getenv("OLLAMA_MODEL", "deepseek-r1:latest")
-    }
+        "llm_provider": "vertex_ai",
+        "gcp_project_id": os.getenv("GCP_PROJECT_ID", "motherofbots"),
+        "gcp_location": os.getenv("GCP_LOCATION", "us-central1"),
+        "gemini_model": os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    })
+
 
 # Requirements Analysis Endpoint
-@app.post("/api/analyze-requirements")
-async def analyze_requirements_endpoint(request: RequirementsRequest):
+@app.route("/api/analyze-requirements", methods=["POST"])
+def analyze_requirements_endpoint():
     """
     Analyze user requirements and extract structured information
     
-    Args:
-        request: RequirementsRequest with message and output_format
+    Expected JSON body:
+        message: str - The user message to analyze
+        output_format: str - "text" or "json" (default: "text")
         
     Returns:
         Analyzed requirements in text or JSON format
     """
     try:
-        logger.info(f"[API] Analyzing requirements: {request.message[:50]}...")
-        result = await analyze_requirements(request.message, request.output_format)
-        return {
+        data = request.get_json()
+        if not data or "message" not in data:
+            return jsonify({"status": "error", "detail": "Missing 'message' field"}), 400
+        
+        message = data["message"]
+        output_format = data.get("output_format", "text")
+        
+        logger.info(f"[API] Analyzing requirements: {message[:50]}...")
+        result = run_async(analyze_requirements(message, output_format))
+        return jsonify({
             "status": "success",
             "result": result,
-            "format": request.output_format
-        }
+            "format": output_format
+        })
     except Exception as e:
         logger.error(f"[API] Error analyzing requirements: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error analyzing requirements: {str(e)}")
+        return jsonify({"status": "error", "detail": f"Error analyzing requirements: {str(e)}"}), 500
 
-@app.post("/api/analyze-requirements-full")
-async def analyze_requirements_full_endpoint(request: RequirementsRequest):
+
+@app.route("/api/analyze-requirements-full", methods=["POST"])
+def analyze_requirements_full_endpoint():
     """
     Analyze requirements and return both text and JSON formats
     
-    Args:
-        request: RequirementsRequest with message
+    Expected JSON body:
+        message: str - The user message to analyze
         
     Returns:
         Tuple of (text_analysis, json_analysis)
     """
     try:
-        logger.info(f"[API] Analyzing requirements (full): {request.message[:50]}...")
-        text_result, json_result = await analyze_and_format_for_code_generation(request.message)
-        return {
+        data = request.get_json()
+        if not data or "message" not in data:
+            return jsonify({"status": "error", "detail": "Missing 'message' field"}), 400
+        
+        message = data["message"]
+        
+        logger.info(f"[API] Analyzing requirements (full): {message[:50]}...")
+        text_result, json_result = run_async(analyze_and_format_for_code_generation(message))
+        return jsonify({
             "status": "success",
             "text_analysis": text_result,
             "json_analysis": json_result
-        }
+        })
     except Exception as e:
         logger.error(f"[API] Error in full requirements analysis: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error analyzing requirements: {str(e)}")
+        return jsonify({"status": "error", "detail": f"Error analyzing requirements: {str(e)}"}), 500
+
 
 # Code Generation Endpoint
-@app.post("/api/generate-code")
-async def generate_code_endpoint(request: CodeGenerationRequest):
+@app.route("/api/generate-code", methods=["POST"])
+def generate_code_endpoint():
     """
     Generate backend code based on requirements
     
-    Args:
-        request: CodeGenerationRequest with requirements (str or dict)
+    Expected JSON body:
+        requirements: str or dict - The requirements for code generation
         
     Returns:
         Generated backend code
     """
-    try:
-        logger.info(f"[API] Generating code for requirements")
+    async def _generate_code(requirements):
         agent = StandaloneCodeGenerationAgent()
         await agent.start()
-        
         try:
-            code = await agent.generate_code(request.requirements)
-            return {
-                "status": "success",
-                "code": code,
-                "length": len(code)
-            }
+            code = await agent.generate_code(requirements)
+            return code
         finally:
             await agent.stop()
+    
+    try:
+        data = request.get_json()
+        if not data or "requirements" not in data:
+            return jsonify({"status": "error", "detail": "Missing 'requirements' field"}), 400
+        
+        requirements = data["requirements"]
+        
+        logger.info(f"[API] Generating code for requirements")
+        code = run_async(_generate_code(requirements))
+        return jsonify({
+            "status": "success",
+            "code": code,
+            "length": len(code)
+        })
     except Exception as e:
         logger.error(f"[API] Error generating code: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error generating code: {str(e)}")
+        return jsonify({"status": "error", "detail": f"Error generating code: {str(e)}"}), 500
+
 
 # UI Generation Endpoint
-@app.post("/api/generate-ui")
-async def generate_ui_endpoint(request: UIGenerationRequest):
+@app.route("/api/generate-ui", methods=["POST"])
+def generate_ui_endpoint():
     """
     Generate UI code based on requirements
     
-    Args:
-        request: UIGenerationRequest with requirements (str or dict)
+    Expected JSON body:
+        requirements: str or dict - The requirements for UI generation
         
     Returns:
         Generated UI code
     """
-    try:
-        logger.info(f"[API] Generating UI code for requirements")
+    async def _generate_ui(requirements):
         agent = StandaloneUIGenerationAgent()
         await agent.start()
-        
         try:
-            ui_code = await agent.generate_ui_code(request.requirements)
-            return {
-                "status": "success",
-                "ui_code": ui_code,
-                "length": len(ui_code)
-            }
+            ui_code = await agent.generate_ui_code(requirements)
+            return ui_code
         finally:
             await agent.stop()
+    
+    try:
+        data = request.get_json()
+        if not data or "requirements" not in data:
+            return jsonify({"status": "error", "detail": "Missing 'requirements' field"}), 400
+        
+        requirements = data["requirements"]
+        
+        logger.info(f"[API] Generating UI code for requirements")
+        ui_code = run_async(_generate_ui(requirements))
+        return jsonify({
+            "status": "success",
+            "ui_code": ui_code,
+            "length": len(ui_code)
+        })
     except Exception as e:
         logger.error(f"[API] Error generating UI code: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error generating UI code: {str(e)}")
+        return jsonify({"status": "error", "detail": f"Error generating UI code: {str(e)}"}), 500
+
 
 # Project Integration Endpoint
-@app.post("/api/integrate-project")
-async def integrate_project_endpoint(request: IntegrationRequest):
+@app.route("/api/integrate-project", methods=["POST"])
+def integrate_project_endpoint():
     """
     Integrate backend and UI code into a complete project
     
-    Args:
-        request: IntegrationRequest with backend_code, ui_code, and optional requirements
+    Expected JSON body:
+        backend_code: str - The backend code
+        ui_code: str - The UI code
+        requirements: dict (optional) - Additional requirements
         
     Returns:
         Project directory path
     """
-    try:
-        logger.info(f"[API] Integrating project")
+    async def _integrate_project(backend_code, ui_code, requirements):
         agent = StandaloneIntegratorAgent()
         await agent.start()
-        
         try:
-            project_dir = await agent.integrate_project(
-                request.backend_code,
-                request.ui_code,
-                request.requirements or {}
-            )
-            return {
-                "status": "success",
-                "project_dir": project_dir,
-                "exists": os.path.exists(project_dir) if project_dir else False
-            }
+            project_dir = await agent.integrate_project(backend_code, ui_code, requirements)
+            return project_dir
         finally:
             await agent.stop()
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"status": "error", "detail": "Missing request body"}), 400
+        if "backend_code" not in data:
+            return jsonify({"status": "error", "detail": "Missing 'backend_code' field"}), 400
+        if "ui_code" not in data:
+            return jsonify({"status": "error", "detail": "Missing 'ui_code' field"}), 400
+        
+        backend_code = data["backend_code"]
+        ui_code = data["ui_code"]
+        requirements = data.get("requirements", {})
+        
+        logger.info(f"[API] Integrating project")
+        project_dir = run_async(_integrate_project(backend_code, ui_code, requirements))
+        return jsonify({
+            "status": "success",
+            "project_dir": project_dir,
+            "exists": os.path.exists(project_dir) if project_dir else False
+        })
     except Exception as e:
         logger.error(f"[API] Error integrating project: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error integrating project: {str(e)}")
+        return jsonify({"status": "error", "detail": f"Error integrating project: {str(e)}"}), 500
+
 
 # Deployment Endpoint
-@app.post("/api/deploy-project")
-async def deploy_project_endpoint(request: DeploymentRequest):
+@app.route("/api/deploy-project", methods=["POST"])
+def deploy_project_endpoint():
     """
     Deploy a generated project to local servers
     
-    Args:
-        request: DeploymentRequest with project_dir
+    Expected JSON body:
+        project_dir: str - Path to the project directory
         
     Returns:
         Deployment status with backend and frontend URLs
     """
-    try:
-        logger.info(f"[API] Deploying project: {request.project_dir}")
+    async def _deploy_project(project_dir):
         agent = StandaloneDeployerAgent()
         await agent.start()
+        result = await agent.deploy_project(project_dir)
+        # Don't stop deployer agent - keep services running
+        return result
+    
+    try:
+        data = request.get_json()
+        if not data or "project_dir" not in data:
+            return jsonify({"status": "error", "detail": "Missing 'project_dir' field"}), 400
         
-        try:
-            result = await agent.deploy_project(request.project_dir)
-            return result
-        finally:
-            # Don't stop deployer agent - keep services running
-            pass
+        project_dir = data["project_dir"]
+        
+        logger.info(f"[API] Deploying project: {project_dir}")
+        result = run_async(_deploy_project(project_dir))
+        return jsonify(result)
     except Exception as e:
         logger.error(f"[API] Error deploying project: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error deploying project: {str(e)}")
+        return jsonify({"status": "error", "detail": f"Error deploying project: {str(e)}"}), 500
+
 
 # Full Workflow Endpoint (all-in-one)
-@app.post("/api/generate-full-project")
-async def generate_full_project_endpoint(request: RequirementsRequest):
+@app.route("/api/generate-full-project", methods=["POST"])
+def generate_full_project_endpoint():
     """
     Complete workflow: Analyze requirements -> Generate code -> Generate UI -> Integrate -> Deploy
     
-    Args:
-        request: RequirementsRequest with message
+    Expected JSON body:
+        message: str - The user requirements message
         
     Returns:
         Complete project information including deployment URLs
     """
-    import traceback
-    
-    # Truncate very long messages to prevent memory issues
-    message = request.message
-    max_message_length = 15000  # Increased but still limited
-    if len(message) > max_message_length:
-        logger.warning(f"[API] Message is very long ({len(message)} chars), truncating to {max_message_length} for processing")
-        message = message[:max_message_length] + "\n\n[Message truncated for processing...]"
-    
-    code_agent = None
-    ui_agent = None
-    integrator_agent = None
-    deployer_agent = None
-    
-    try:
-        logger.info(f"[API] Starting full project generation workflow (message length: {len(request.message)})")
+    async def _full_workflow(message):
+        code_agent = None
+        ui_agent = None
+        integrator_agent = None
+        deployer_agent = None
         
         # Step 1: Analyze requirements
-        try:
-            logger.info("[API] Step 1: Analyzing requirements")
-            text_analysis, json_analysis = await analyze_and_format_for_code_generation(message)
-            logger.info(f"[API] Step 1 complete: Analysis length - {len(text_analysis)} chars")
-        except Exception as e:
-            logger.error(f"[API] Step 1 failed: {str(e)}")
-            logger.error(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=f"Error analyzing requirements: {str(e)}")
+        logger.info("[API] Step 1: Analyzing requirements")
+        text_analysis, json_analysis = await analyze_and_format_for_code_generation(message)
+        logger.info(f"[API] Step 1 complete: Analysis length - {len(text_analysis)} chars")
         
         # Step 2: Generate backend code
+        logger.info("[API] Step 2: Generating backend code")
+        code_agent = StandaloneCodeGenerationAgent()
+        await code_agent.start()
         try:
-            logger.info("[API] Step 2: Generating backend code")
-            code_agent = StandaloneCodeGenerationAgent()
-            await code_agent.start()
             requirements_input = json_analysis if isinstance(json_analysis, dict) else message
             backend_code = await code_agent.generate_code(requirements_input)
             logger.info(f"[API] Step 2 complete: Backend code length - {len(backend_code)} chars")
-        except Exception as e:
-            logger.error(f"[API] Step 2 failed: {str(e)}")
-            logger.error(traceback.format_exc())
-            if code_agent:
-                try:
-                    await code_agent.stop()
-                except:
-                    pass
-            raise HTTPException(status_code=500, detail=f"Error generating backend code: {str(e)}")
         finally:
-            if code_agent:
-                try:
-                    await code_agent.stop()
-                except:
-                    pass
+            await code_agent.stop()
         
         # Step 3: Check if UI is needed and generate
         ui_code = None
-        needs_ui = False
-        try:
-            # Combine all text sources for UI detection
-            combined_text = message.lower() + " " + text_analysis.lower()
-            if isinstance(json_analysis, dict):
-                combined_text += " " + str(json_analysis).lower()
-            
-            # Check for UI keywords - always generate UI for chatbot requests
-            ui_keywords = ["ui", "interface", "frontend", "react", "vue", "angular", "web page", "website", 
-                         "chatbot", "chat", "conversational", "user interface", "dashboard", "bot", 
-                         "create", "build", "generate", "make"]
-            
-            # For chatbot creation, always generate UI
-            chatbot_keywords = ["chatbot", "chat bot", "conversational", "bot", "assistant"]
-            is_chatbot_request = any(keyword in combined_text for keyword in chatbot_keywords)
-            
-            if is_chatbot_request:
-                needs_ui = True
-                logger.info("[API] Chatbot detected - UI generation will be enabled")
-            else:
-                needs_ui = any(keyword in combined_text for keyword in ui_keywords)
-            
-            if needs_ui:
-                logger.info("[API] Step 3: Generating UI code")
-                ui_agent = StandaloneUIGenerationAgent()
-                await ui_agent.start()
+        combined_text = message.lower() + " " + text_analysis.lower()
+        if isinstance(json_analysis, dict):
+            combined_text += " " + str(json_analysis).lower()
+        
+        ui_keywords = ["ui", "interface", "frontend", "react", "vue", "angular", "web page", "website", 
+                     "chatbot", "chat", "conversational", "user interface", "dashboard", "bot", 
+                     "create", "build", "generate", "make"]
+        chatbot_keywords = ["chatbot", "chat bot", "conversational", "bot", "assistant"]
+        is_chatbot_request = any(keyword in combined_text for keyword in chatbot_keywords)
+        needs_ui = is_chatbot_request or any(keyword in combined_text for keyword in ui_keywords)
+        
+        if needs_ui:
+            logger.info("[API] Step 3: Generating UI code")
+            ui_agent = StandaloneUIGenerationAgent()
+            await ui_agent.start()
+            try:
                 requirements_input = json_analysis if isinstance(json_analysis, dict) else message
                 ui_code = await ui_agent.generate_ui_code(requirements_input)
                 logger.info(f"[API] Step 3 complete: UI code length - {len(ui_code)} chars")
-            else:
-                logger.info("[API] Step 3: Skipping UI generation (not needed)")
-        except Exception as e:
-            logger.error(f"[API] Step 3 failed: {str(e)}")
-            logger.error(traceback.format_exc())
-            if ui_agent:
-                try:
-                    await ui_agent.stop()
-                except:
-                    pass
-            # Don't fail the whole workflow if UI generation fails
-            logger.warning("[API] Continuing without UI code")
-            ui_code = None
-        finally:
-            if ui_agent:
-                try:
-                    await ui_agent.stop()
-                except:
-                    pass
+            except Exception as e:
+                logger.warning(f"[API] Step 3 failed, continuing without UI: {str(e)}")
+                ui_code = None
+            finally:
+                await ui_agent.stop()
+        else:
+            logger.info("[API] Step 3: Skipping UI generation (not needed)")
         
         # Step 4: Integrate project
+        logger.info("[API] Step 4: Integrating project")
+        integrator_agent = StandaloneIntegratorAgent()
+        await integrator_agent.start()
         try:
-            logger.info("[API] Step 4: Integrating project")
-            integrator_agent = StandaloneIntegratorAgent()
-            await integrator_agent.start()
             project_dir = await integrator_agent.integrate_project(
                 backend_code,
                 ui_code or "",
                 json_analysis if isinstance(json_analysis, dict) else {}
             )
             logger.info(f"[API] Step 4 complete: Project directory - {project_dir}")
-        except Exception as e:
-            logger.error(f"[API] Step 4 failed: {str(e)}")
-            logger.error(traceback.format_exc())
-            if integrator_agent:
-                try:
-                    await integrator_agent.stop()
-                except:
-                    pass
-            raise HTTPException(status_code=500, detail=f"Error integrating project: {str(e)}")
         finally:
-            if integrator_agent:
-                try:
-                    await integrator_agent.stop()
-                except:
-                    pass
+            await integrator_agent.stop()
         
-        # Step 5: Deploy project (optional, don't fail if deployment fails)
+        # Step 5: Deploy project
         deployment_result = {}
         try:
             logger.info("[API] Step 5: Deploying project")
@@ -399,18 +374,12 @@ async def generate_full_project_endpoint(request: RequirementsRequest):
             deployment_result = await deployer_agent.deploy_project(project_dir)
             logger.info(f"[API] Step 5 complete: Deployment successful")
         except Exception as e:
-            logger.error(f"[API] Step 5 failed: {str(e)}")
-            logger.error(traceback.format_exc())
-            # Don't fail the whole workflow if deployment fails
+            logger.warning(f"[API] Step 5 failed: {str(e)}")
             deployment_result = {
                 "status": "error",
                 "error": str(e),
                 "message": "Project generated but deployment failed"
             }
-            logger.warning("[API] Continuing despite deployment failure")
-        finally:
-            # Don't stop deployer agent - keep services running
-            pass
         
         return {
             "status": "success",
@@ -430,15 +399,29 @@ async def generate_full_project_endpoint(request: RequirementsRequest):
             },
             "deployment": deployment_result
         }
-    except HTTPException:
-        # Re-raise HTTP exceptions
-        raise
+    
+    try:
+        data = request.get_json()
+        if not data or "message" not in data:
+            return jsonify({"status": "error", "detail": "Missing 'message' field"}), 400
+        
+        message = data["message"]
+        
+        # Truncate very long messages to prevent memory issues
+        max_message_length = 15000
+        if len(message) > max_message_length:
+            logger.warning(f"[API] Message is very long ({len(message)} chars), truncating to {max_message_length}")
+            message = message[:max_message_length] + "\n\n[Message truncated for processing...]"
+        
+        logger.info(f"[API] Starting full project generation workflow (message length: {len(message)})")
+        result = run_async(_full_workflow(message))
+        return jsonify(result)
     except Exception as e:
         logger.error(f"[API] Unexpected error in full project generation: {str(e)}")
         logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Error generating full project: {str(e)}")
+        return jsonify({"status": "error", "detail": f"Error generating full project: {str(e)}"}), 500
+
 
 if __name__ == "__main__":
-    import uvicorn
     port = int(os.getenv("API_PORT", "8000"))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=True)

@@ -50,10 +50,11 @@ except ImportError:
 # pypandoc is not used as it doesn't support .doc format directly
 
 # Configuration from environment variables
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "deepseek-r1:latest")
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "motherofbots")
+GCP_LOCATION = os.getenv("GCP_LOCATION", "us-central1")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
-# FastAPI configuration
+# Flask API configuration
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 # Setup page config
@@ -194,8 +195,8 @@ if 'agent' not in st.session_state:
     st.session_state.user_id = f"user_{uuid.uuid4()}"
     st.session_state.waiting_for_response = False
     
-    # Using FastAPI mode (no agent_type needed)
-    st.session_state.agent_type = "fastapi"
+    # Using Flask API mode (no agent_type needed)
+    st.session_state.agent_type = "flask"
     
     st.session_state.show_analysis = True  # Show requirements analysis by default
     st.session_state.auto_generate_code = True  # Automatically generate code after analysis
@@ -477,9 +478,9 @@ def run_async(coro):
             raise
 
 def initialize_agent():
-    """No longer needed - using FastAPI instead"""
+    """No longer needed - using Flask API instead"""
     st.session_state.agent_running = True
-    logger.info("Using FastAPI for all operations")
+    logger.info("Using Flask API for all operations")
     return True
 
 def end_agent_session():
@@ -498,8 +499,8 @@ def end_agent_session():
         return False
     return True
 
-async def call_fastapi_endpoint(endpoint: str, payload: dict):
-    """Call a FastAPI endpoint asynchronously with memory-efficient handling"""
+async def call_api_endpoint(endpoint: str, payload: dict):
+    """Call a Flask API endpoint asynchronously with memory-efficient handling"""
     # Limit payload size to prevent memory issues
     if "message" in payload:
         max_message_length = 15000  # Limit total message length
@@ -531,9 +532,9 @@ async def call_fastapi_endpoint(endpoint: str, payload: dict):
             raise
 
 async def get_requirements_analysis(message):
-    """Get requirements analysis via FastAPI"""
+    """Get requirements analysis via Flask API"""
     try:
-        result = await call_fastapi_endpoint("/api/analyze-requirements", {
+        result = await call_api_endpoint("/api/analyze-requirements", {
             "message": message,
             "output_format": "text"
         })
@@ -546,26 +547,26 @@ async def direct_requirements_to_code(message):
     """
     Complete chatbot creation workflow:
     1. Analyze requirements from user input (and documents if provided)
-    2. Generate backend code (FastAPI/Python)
+    2. Generate backend code (Flask/Python)
     3. Generate UI code (React/TailwindCSS) 
     4. Integrate into a complete project structure
     5. Deploy to local servers
     
     This enables a chatbot to create another chatbot seamlessly.
     """
-    logger.info(f"Analyzing requirements and generating code via FastAPI for: {message[:50]}...")
+    logger.info(f"Analyzing requirements and generating code via Flask API for: {message[:50]}...")
     
     try:
-        # Use FastAPI full workflow endpoint - this orchestrates all agents
-        logger.info("Calling FastAPI /api/generate-full-project endpoint")
-        result = await call_fastapi_endpoint("/api/generate-full-project", {
+        # Use Flask API full workflow endpoint - this orchestrates all agents
+        logger.info("Calling Flask API /api/generate-full-project endpoint")
+        result = await call_api_endpoint("/api/generate-full-project", {
             "message": message,
             "output_format": "text"
         })
         
         if result.get("status") != "success":
             error_msg = result.get("detail", "Unknown error")
-            logger.error(f"FastAPI workflow failed: {error_msg}")
+            logger.error(f"Flask API workflow failed: {error_msg}")
             return f"Error generating project: {error_msg}", None
         
         # Extract results
@@ -626,7 +627,7 @@ A complete project has been assembled at: `{project_dir}`
             return req_text, backend_code
             
     except Exception as e:
-        logger.error(f"Error in FastAPI workflow: {str(e)}")
+        logger.error(f"Error in Flask API workflow: {str(e)}")
         return f"I couldn't properly generate your project due to an error: {str(e)}", None
 
 def _check_if_ui_needed(requirements_json, requirements_text):
@@ -660,10 +661,10 @@ def _check_if_ui_needed(requirements_json, requirements_text):
     return False
 
 def get_agent_response(message, is_code_generation=False):
-    """Get a response via FastAPI (synchronous wrapper)"""
+    """Get a response via Flask API (synchronous wrapper)"""
     try:
-        # Call FastAPI for requirements analysis
-        result = run_async(call_fastapi_endpoint("/api/analyze-requirements", {
+        # Call Flask API for requirements analysis
+        result = run_async(call_api_endpoint("/api/analyze-requirements", {
             "message": message,
             "output_format": "text"
         }))
@@ -676,24 +677,24 @@ def get_agent_response(message, is_code_generation=False):
         else:
             return f"I received your message: {message}\n\nPlease provide more details about what you'd like me to help with."
     except Exception as e:
-        logger.error(f"Error getting response from FastAPI: {str(e)}")
-        return f"Error communicating with FastAPI: {str(e)}\n\nPlease ensure FastAPI is running at {API_BASE_URL}"
+        logger.error(f"Error getting response from Flask API: {str(e)}")
+        return f"Error communicating with Flask API: {str(e)}\n\nPlease ensure Flask API is running at {API_BASE_URL}"
 
 # Main application header
 st.title("🤖 Mother of Bots - Multi-Agent Chat Interface")
-st.subheader(f"Using {OLLAMA_MODEL} via LangChain 🦜️")
+st.subheader(f"Using {GEMINI_MODEL} via Vertex AI 🦜️")
 
 # Sidebar with info and controls
 with st.sidebar:
     st.markdown("## About")
     st.markdown("""
     This is a chat interface for the Mother of Bots multi-agent system. 
-    It uses **LangChain** with Ollama for language model responses and **FastAPI** for agent orchestration.
+    It uses **LangChain** with Google Vertex AI (Gemini) for language model responses and **Flask** for agent orchestration.
     
-    **Powered by LangChain** 🦜️ **FastAPI** ⚡
+    **Powered by LangChain** 🦜️ **Vertex AI** ☁️ **Flask** 🌶️
     """)
     
-    st.markdown("## FastAPI Status")
+    st.markdown("## Flask API Status")
     api_status = st.empty()
     try:
         async def check_api():
@@ -702,12 +703,12 @@ with st.sidebar:
                 return response.status_code == 200
         api_healthy = run_async(check_api())
         if api_healthy:
-            api_status.success(f"✅ FastAPI is running at {API_BASE_URL}")
+            api_status.success(f"✅ Flask API is running at {API_BASE_URL}")
         else:
-            api_status.error(f"❌ FastAPI not responding at {API_BASE_URL}")
+            api_status.error(f"❌ Flask API not responding at {API_BASE_URL}")
     except Exception as e:
-        api_status.error(f"❌ Cannot connect to FastAPI: {str(e)}")
-        st.warning(f"Please ensure FastAPI is running:\n`uvicorn mother_of_bots.api:app --reload`")
+        api_status.error(f"❌ Cannot connect to Flask API: {str(e)}")
+        st.warning(f"Please ensure Flask API is running:\n`python -m mother_of_bots.api`")
     
     st.markdown("## Interface Settings")
     show_analysis = st.checkbox("Show requirements analysis", value=st.session_state.show_analysis, 
@@ -744,45 +745,45 @@ with st.sidebar:
                 st.success("Services stopped successfully")
                 st.rerun()
     
-    st.markdown("## LangChain Status")
+    st.markdown("## LangChain + Vertex AI Status")
     langchain_status = st.empty()
     
-    # Check LangChain availability and connection
+    # Check LangChain Vertex AI availability
     try:
-        from langchain_community.llms import Ollama
+        from langchain_google_vertexai import ChatVertexAI
         
-        # Try to actually initialize LangChain Ollama LLM to verify connection
+        # Try to initialize LangChain Vertex AI to verify setup
         try:
-            test_llm = Ollama(
-                model=OLLAMA_MODEL,
-                base_url=OLLAMA_URL
+            test_llm = ChatVertexAI(
+                model=GEMINI_MODEL,
+                project=GCP_PROJECT_ID,
+                location=GCP_LOCATION
             )
-            # If initialization succeeds, LangChain can connect
-            langchain_status.success("✅ LangChain is active and ready")
-            st.info(f"**Using LangChain** with Ollama ({OLLAMA_MODEL})\n\nAll LLM operations use LangChain:\n- Requirements Analysis\n- Code Generation\n- UI Generation\n- User Interactions")
+            # If initialization succeeds, LangChain + Vertex AI is ready
+            langchain_status.success("✅ LangChain + Vertex AI is active and ready")
+            st.info(f"**Using LangChain** with Vertex AI ({GEMINI_MODEL})\n\nProject: {GCP_PROJECT_ID}\nLocation: {GCP_LOCATION}\n\nAll LLM operations use LangChain:\n- Requirements Analysis\n- Code Generation\n- UI Generation\n- User Interactions")
         except Exception as e:
-            langchain_status.warning(f"⚠️ LangChain initialized but connection test failed: {str(e)}")
-            st.warning(f"LangChain is installed but may have connection issues with Ollama:\n`{str(e)}`\n\nPlease verify:\n- Ollama is running at {OLLAMA_URL}\n- Model '{OLLAMA_MODEL}' is available")
+            langchain_status.warning(f"⚠️ LangChain initialized but Vertex AI connection test failed: {str(e)}")
+            st.warning(f"LangChain is installed but may have issues with Vertex AI:\n`{str(e)}`\n\nPlease verify:\n- GCP credentials are set up (run `gcloud auth application-default login`)\n- Vertex AI API is enabled in project '{GCP_PROJECT_ID}'\n- Model '{GEMINI_MODEL}' is available")
     except ImportError as e:
-        langchain_status.error(f"❌ LangChain not available: {str(e)}")
-        st.warning("Please install LangChain: `pip install langchain langchain-community`")
+        langchain_status.error(f"❌ LangChain Vertex AI not available: {str(e)}")
+        st.warning("Please install LangChain Vertex AI: `pip install langchain-google-vertexai`")
     
-    st.markdown("## Ollama Status")
-    ollama_status = st.empty()
+    st.markdown("## GCP / Vertex AI Status")
+    vertex_status = st.empty()
     
-    # Check Ollama connection
+    # Check GCP credentials
     try:
-        import requests
-        try:
-            response = requests.get(f"{OLLAMA_URL}")
-            if response.status_code == 200:
-                ollama_status.success(f"Ollama is running at {OLLAMA_URL}")
-            else:
-                ollama_status.error(f"Ollama server error: Status {response.status_code}")
-        except Exception as e:
-            ollama_status.error(f"Cannot connect to Ollama: {str(e)}")
-    except ImportError:
-        st.error("Requests library not installed. Cannot check Ollama status.")
+        import google.auth
+        credentials, project = google.auth.default()
+        if credentials:
+            vertex_status.success(f"✅ GCP credentials configured (Project: {project or GCP_PROJECT_ID})")
+        else:
+            vertex_status.warning("⚠️ GCP credentials not found")
+            st.warning("Run `gcloud auth application-default login` to authenticate")
+    except Exception as e:
+        vertex_status.error(f"❌ GCP auth check failed: {str(e)}")
+        st.warning("Please ensure GCP SDK is installed and run:\n`gcloud auth application-default login`")
     
     
     st.markdown("## Settings")
@@ -815,11 +816,11 @@ with st.sidebar:
     Deployment is enabled by default - your application will automatically run on localhost when generated.
     """)
     
-    st.sidebar.info("FastAPI mode is processing your request.")
+    st.sidebar.info("Flask API mode is processing your request.")
     
     st.markdown("## System Status")
     if st.session_state.agent_running:
-        st.success("✅ System is ready (FastAPI mode)")
+        st.success("✅ System is ready (Flask API mode)")
     else:
         st.warning("System not initialized")
         if st.button("Initialize System"):
@@ -1091,7 +1092,9 @@ if st.session_state.waiting_for_response:
         code_keywords = ["generate code", "create code", "write code", "code for", "generate a program", 
                          "build an application", "develop a system", "create an app", "write a program",
                          "script for", "implement a solution", "code that can", "build a website",
-                         "create a function", "make an algorithm"]
+                         "create a function", "make an algorithm", "create a chatbot", "create chatbot",
+                         "build a chatbot", "build chatbot", "create an application", "create application",
+                         "based on the attached document", "based on the document", "implement"]
         
         # First check if there are explicit code generation keywords
         is_code_request = any(keyword in last_user_message.lower() for keyword in code_keywords)
@@ -1180,7 +1183,7 @@ if st.session_state.waiting_for_response:
 ```
 """
                         
-                        logger.info("FastAPI code generation completed successfully")
+                        logger.info("Flask API code generation completed successfully")
                     else:
                         # Fallback to normal response if code generation failed
                         logger.warning("Code generation failed, falling back to normal response")
@@ -1198,10 +1201,11 @@ I encountered an error while creating your chatbot:
 **Error:** {error_msg}
 
 **Troubleshooting:**
-1. Make sure the FastAPI server is running: `uvicorn mother_of_bots.api:app --reload`
-2. Check that Ollama is running and the model is available
-3. Try simplifying your request or breaking it into smaller parts
-4. Check the API logs for more details
+1. Make sure the Flask API server is running: `python -m mother_of_bots.api`
+2. Check that GCP credentials are set up: `gcloud auth application-default login`
+3. Verify Vertex AI API is enabled in project '{GCP_PROJECT_ID}'
+4. Try simplifying your request or breaking it into smaller parts
+5. Check the API logs for more details
 
 **Your request was:** {last_user_message[:200]}...
 """
