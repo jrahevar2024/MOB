@@ -443,8 +443,8 @@ function App() {{
   const sendMessage = async (text) => {{
     // Send message logic
   }};
-  
-  return (
+        
+        return (
     <div className="flex flex-col h-screen bg-gray-100">
       {{/* Header */}}
       <header className="bg-blue-600 text-white p-4 shadow-md">
