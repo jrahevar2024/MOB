@@ -24,6 +24,10 @@ function App() {
   const [user, setUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   
+  // Conversation management
+  const [conversations, setConversations] = useState([]);
+  const [currentConversationId, setCurrentConversationId] = useState(null);
+  
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -54,12 +58,37 @@ function App() {
     if (storedUser && storedToken) {
       setUser(JSON.parse(storedUser));
       setIsAuthenticated(true);
+      
+      // Load conversations
+      const storedConversations = localStorage.getItem('conversations');
+      if (storedConversations) {
+        const parsedConversations = JSON.parse(storedConversations);
+        setConversations(parsedConversations);
+        
+        // Load the most recent conversation or create a new one
+        if (parsedConversations.length > 0) {
+          const lastConversation = parsedConversations[0];
+          setCurrentConversationId(lastConversation.id);
+          setMessages(lastConversation.messages);
+        } else {
+          createNewConversation();
+        }
+      } else {
+        createNewConversation();
+      }
     }
   }, []);
   
   // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+  
+  // Save conversation when messages change
+  useEffect(() => {
+    if (currentConversationId && messages.length > 0) {
+      saveCurrentConversation(messages);
+    }
   }, [messages]);
   
   // Check API health on mount (only if authenticated)
@@ -136,9 +165,18 @@ function App() {
       documents: attachedDocs
     };
     
-    setMessages(prev => [...prev, userMessage]);
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
     setInputValue('');
     setIsProcessing(true);
+    
+    // Update conversation title if it's the first message
+    if (messages.length === 0) {
+      updateConversationTitle(currentConversationId, inputValue);
+    }
+    
+    // Save conversation
+    saveCurrentConversation(newMessages);
     
     // Check if this is a code generation request
     const codeKeywords = ['generate code', 'create code', 'write code', 'code for', 'generate a program',
@@ -255,9 +293,87 @@ function App() {
     }
   };
   
+  const createNewConversation = () => {
+    const newConversation = {
+      id: Date.now().toString(),
+      title: 'New Chat',
+      messages: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    
+    const updatedConversations = [newConversation, ...conversations];
+    setConversations(updatedConversations);
+    setCurrentConversationId(newConversation.id);
+    setMessages([]);
+    setUploadedFiles([]);
+    
+    // Save to localStorage
+    localStorage.setItem('conversations', JSON.stringify(updatedConversations));
+  };
+  
+  const switchConversation = (conversationId) => {
+    const conversation = conversations.find(c => c.id === conversationId);
+    if (conversation) {
+      setCurrentConversationId(conversationId);
+      setMessages(conversation.messages);
+      setUploadedFiles([]);
+    }
+  };
+  
+  const deleteConversation = (conversationId) => {
+    const updatedConversations = conversations.filter(c => c.id !== conversationId);
+    setConversations(updatedConversations);
+    localStorage.setItem('conversations', JSON.stringify(updatedConversations));
+    
+    // If deleting current conversation, switch to another or create new
+    if (conversationId === currentConversationId) {
+      if (updatedConversations.length > 0) {
+        switchConversation(updatedConversations[0].id);
+      } else {
+        createNewConversation();
+      }
+    }
+  };
+  
+  const updateConversationTitle = (conversationId, firstMessage) => {
+    const updatedConversations = conversations.map(conv => {
+      if (conv.id === conversationId && conv.title === 'New Chat') {
+        return {
+          ...conv,
+          title: firstMessage.substring(0, 30) + (firstMessage.length > 30 ? '...' : ''),
+          updatedAt: new Date().toISOString()
+        };
+      }
+      return conv;
+    });
+    setConversations(updatedConversations);
+    localStorage.setItem('conversations', JSON.stringify(updatedConversations));
+  };
+  
+  const saveCurrentConversation = (newMessages) => {
+    const updatedConversations = conversations.map(conv => {
+      if (conv.id === currentConversationId) {
+        return {
+          ...conv,
+          messages: newMessages,
+          updatedAt: new Date().toISOString()
+        };
+      }
+      return conv;
+    });
+    
+    // Sort by updatedAt (most recent first)
+    updatedConversations.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+    
+    setConversations(updatedConversations);
+    localStorage.setItem('conversations', JSON.stringify(updatedConversations));
+  };
+  
   const resetConversation = () => {
     setMessages([]);
     setUploadedFiles([]);
+    saveCurrentConversation([]);
   };
   
   const handleLogin = (userData) => {
@@ -268,9 +384,12 @@ function App() {
   const handleLogout = () => {
     localStorage.removeItem('user');
     localStorage.removeItem('authToken');
+    localStorage.removeItem('conversations');
     setUser(null);
     setIsAuthenticated(false);
     setMessages([]);
+    setConversations([]);
+    setCurrentConversationId(null);
     setUploadedFiles([]);
     setBackendUrl(null);
     setFrontendUrl(null);
@@ -353,71 +472,119 @@ function App() {
         </div>
         
         <h2>🤖 Mother of Bots</h2>
-        <p style={{ fontSize: '0.9rem', color: '#666' }}>Multi-Agent Chat Interface</p>
+        <p style={{ fontSize: '0.9rem', color: '#666' }}>
+          Multi-Agent Chat Interface
+        </p>
+        <div className="user-role-badge">
+          <span className={`role-tag ${user?.role}`}>
+            {user?.role === 'admin' ? '👑 Administrator' : '👤 User'}
+          </span>
+        </div>
         
-        <div>
-          <h3>Flask API Status</h3>
-          <div className={`status-badge ${apiStatus.status}`}>
-            {apiStatus.status === 'success' ? <CheckCircle size={16} /> : 
-             apiStatus.status === 'error' ? <XCircle size={16} /> : 
-             <AlertCircle size={16} />}
-            {apiStatus.message}
+        {/* Recent Chats Section */}
+        <div className="recent-chats-section">
+          <div className="recent-chats-header">
+            <h3>💬 Recent Chats</h3>
+            <button className="new-chat-btn" onClick={createNewConversation} title="New Chat">
+              +
+            </button>
+          </div>
+          <div className="conversations-list">
+            {conversations.map(conv => (
+              <div
+                key={conv.id}
+                className={`conversation-item ${conv.id === currentConversationId ? 'active' : ''}`}
+                onClick={() => switchConversation(conv.id)}
+              >
+                <div className="conversation-info">
+                  <div className="conversation-title">{conv.title}</div>
+                  <div className="conversation-date">
+                    {new Date(conv.updatedAt).toLocaleDateString()}
+                  </div>
+                </div>
+                <button
+                  className="delete-conversation-btn"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    deleteConversation(conv.id);
+                  }}
+                  title="Delete"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
           </div>
         </div>
         
-        <div>
-          <h3>Vertex AI Status</h3>
-          <div className={`status-badge ${vertexAIStatus.status}`}>
-            {vertexAIStatus.status === 'success' ? <CheckCircle size={16} /> : 
-             vertexAIStatus.status === 'error' ? <XCircle size={16} /> : 
-             <AlertCircle size={16} />}
-            {vertexAIStatus.message}
-          </div>
-        </div>
-        
-        <div>
-          <h3>Interface Settings</h3>
-          <div className="setting-item">
-            <input 
-              type="checkbox" 
-              id="showAnalysis" 
-              checked={showAnalysis}
-              onChange={(e) => setShowAnalysis(e.target.checked)}
-            />
-            <label htmlFor="showAnalysis">Show requirements analysis</label>
-          </div>
-          <div className="setting-item">
-            <input 
-              type="checkbox" 
-              id="autoCode" 
-              checked={autoGenerateCode}
-              onChange={(e) => setAutoGenerateCode(e.target.checked)}
-            />
-            <label htmlFor="autoCode">Auto-generate code</label>
-          </div>
-          <div className="setting-item">
-            <input 
-              type="checkbox" 
-              id="deploy" 
-              checked={deployServices}
-              onChange={(e) => setDeployServices(e.target.checked)}
-            />
-            <label htmlFor="deploy">Deploy generated projects</label>
-          </div>
-        </div>
-        
-        {backendUrl && frontendUrl && (
-          <div>
-            <h3>Deployed Services</h3>
-            <div className="deployment-info">
-              <p>Your application is running!</p>
-              <p><a href={backendUrl} target="_blank" rel="noopener noreferrer">Backend API</a></p>
-              <p><a href={frontendUrl} target="_blank" rel="noopener noreferrer">Frontend UI</a></p>
-              <button className="btn btn-danger" style={{ marginTop: '10px', width: '100%' }}>
-                <StopCircle size={16} /> Stop Services
-              </button>
+        {/* Admin-only sections */}
+        {user?.role === 'admin' && (
+          <>
+            <div>
+              <h3>Flask API Status</h3>
+              <div className={`status-badge ${apiStatus.status}`}>
+                {apiStatus.status === 'success' ? <CheckCircle size={16} /> : 
+                 apiStatus.status === 'error' ? <XCircle size={16} /> : 
+                 <AlertCircle size={16} />}
+                {apiStatus.message}
+              </div>
             </div>
-          </div>
+            
+            <div>
+              <h3>Vertex AI Status</h3>
+              <div className={`status-badge ${vertexAIStatus.status}`}>
+                {vertexAIStatus.status === 'success' ? <CheckCircle size={16} /> : 
+                 vertexAIStatus.status === 'error' ? <XCircle size={16} /> : 
+                 <AlertCircle size={16} />}
+                {vertexAIStatus.message}
+              </div>
+            </div>
+            
+            <div>
+              <h3>Interface Settings</h3>
+              <div className="setting-item">
+                <input 
+                  type="checkbox" 
+                  id="showAnalysis" 
+                  checked={showAnalysis}
+                  onChange={(e) => setShowAnalysis(e.target.checked)}
+                />
+                <label htmlFor="showAnalysis">Show requirements analysis</label>
+              </div>
+              <div className="setting-item">
+                <input 
+                  type="checkbox" 
+                  id="autoCode" 
+                  checked={autoGenerateCode}
+                  onChange={(e) => setAutoGenerateCode(e.target.checked)}
+                />
+                <label htmlFor="autoCode">Auto-generate code</label>
+              </div>
+              <div className="setting-item">
+                <input 
+                  type="checkbox" 
+                  id="deploy" 
+                  checked={deployServices}
+                  onChange={(e) => setDeployServices(e.target.checked)}
+                />
+                <label htmlFor="deploy">Deploy generated projects</label>
+              </div>
+            </div>
+            
+            {backendUrl && frontendUrl && (
+              <div>
+                <h3>Deployed Services</h3>
+                <div className="deployment-info">
+                  <p>Your application is running!</p>
+                  <p><a href={backendUrl} target="_blank" rel="noopener noreferrer">Backend API</a></p>
+                  <p><a href={frontendUrl} target="_blank" rel="noopener noreferrer">Frontend UI</a></p>
+                  <button className="btn btn-danger" style={{ marginTop: '10px', width: '100%' }}>
+                    <StopCircle size={16} /> Stop Services
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
         )}
         
         <div style={{ marginTop: 'auto' }}>
