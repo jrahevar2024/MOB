@@ -9,6 +9,7 @@ function LoginPage({ onLogin }) {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
+  const [userRole, setUserRole] = useState('user'); // 'user' or 'admin'
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -35,6 +36,7 @@ function LoginPage({ onLogin }) {
       const user = {
         username: username,
         email: `${username}@example.com`,
+        role: userRole, // 'user' or 'admin'
         loginTime: new Date().toISOString()
       };
       
@@ -47,13 +49,15 @@ function LoginPage({ onLogin }) {
     }, 1000);
   };
 
-  const handleDemoLogin = () => {
-    setUsername('demo');
+  const handleDemoLogin = (role = 'admin') => {
+    const demoUser = role === 'admin' ? 'admin' : 'demo';
+    setUsername(demoUser);
     setPassword('demo123');
     setTimeout(() => {
       const user = {
-        username: 'demo',
-        email: 'demo@motherofbots.com',
+        username: demoUser,
+        email: `${demoUser}@motherofbots.com`,
+        role: role,
         loginTime: new Date().toISOString()
       };
       localStorage.setItem('user', JSON.stringify(user));
@@ -132,6 +136,23 @@ function LoginPage({ onLogin }) {
             </div>
           </div>
 
+          <div className="form-group">
+            <label htmlFor="role" className="form-label">
+              <User size={18} />
+              User Role
+            </label>
+            <select
+              id="role"
+              className="form-input role-select"
+              value={userRole}
+              onChange={(e) => setUserRole(e.target.value)}
+              disabled={isLoading}
+            >
+              <option value="user">Normal User</option>
+              <option value="admin">Administrator</option>
+            </select>
+          </div>
+
           {!isSignUp && (
             <div className="form-footer">
               <label className="remember-me">
@@ -159,15 +180,26 @@ function LoginPage({ onLogin }) {
             )}
           </button>
 
-          <button
-            type="button"
-            className="demo-button"
-            onClick={handleDemoLogin}
-            disabled={isLoading}
-          >
-            <Bot size={18} />
-            Try Demo Account
-          </button>
+          <div className="demo-buttons-group">
+            <button
+              type="button"
+              className="demo-button"
+              onClick={() => handleDemoLogin('user')}
+              disabled={isLoading}
+            >
+              <User size={18} />
+              Demo User
+            </button>
+            <button
+              type="button"
+              className="demo-button admin"
+              onClick={() => handleDemoLogin('admin')}
+              disabled={isLoading}
+            >
+              <Bot size={18} />
+              Demo Admin
+            </button>
+          </div>
         </form>
 
         <div className="login-divider">
