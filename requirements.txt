@@ -10,6 +10,7 @@ langchain-google-vertexai>=2.0.0
 
 # Google Cloud / Vertex AI
 google-cloud-aiplatform>=1.38.0
+google-cloud-storage>=2.10.0
 
 # Flask web server
 flask>=3.0.0

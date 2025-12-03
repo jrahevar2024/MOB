@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend-deployment
+  labels:
+    app: mother-of-bots
+    component: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mother-of-bots
+      component: frontend
+  template:
+    metadata:
+      labels:
+        app: mother-of-bots
+        component: frontend
+    spec:
+      serviceAccountName: frontend-service-account
+      containers:
+      - name: frontend
+        image: us-central1-docker.pkg.dev/motherofbots/docker-repo/mother-of-bots-frontend:latest
+        ports:
+        - containerPort: 80
+          name: http
+        # VITE_API_BASE_URL removed - it doesn't work at runtime
+        # The frontend will use '/api' which nginx will proxy to backend
+        resources:
+          requests:
+            memory: "128Mi"
+            cpu: "100m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-service
+  labels:
+    app: mother-of-bots
+    component: frontend
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
+    protocol: TCP
+    name: http
+  selector:
+    app: mother-of-bots
+    component: frontend
+

@@ -50,11 +50,32 @@ class StandaloneDeployerAgent:
                 with open(requirements_file, "w") as f:
                     f.write("fastapi>=0.100.0\nuvicorn>=0.23.0\nsqlalchemy>=2.0.0\npydantic>=2.0.0\npython-dotenv>=1.0.0\n")
 
+            # Install dependencies if requirements.txt exists
+            # Note: In Kubernetes, this installs to the container's Python environment
+            # For production, generated projects should be deployed separately
+            if os.path.exists(requirements_file):
+                logger.info(f"[Deployer] Installing dependencies from {requirements_file}")
+                try:
+                    install_result = subprocess.run(
+                        ["pip", "install", "-q", "-r", requirements_file],
+                        cwd=backend_dir,
+                        capture_output=True,
+                        text=True,
+                        timeout=120
+                    )
+                    if install_result.returncode != 0:
+                        logger.warning(f"[Deployer] Dependency installation had warnings: {install_result.stderr[:200]}")
+                except subprocess.TimeoutExpired:
+                    logger.error("[Deployer] Dependency installation timed out")
+                except Exception as e:
+                    logger.warning(f"[Deployer] Could not install dependencies: {e}. Trying to run anyway...")
+
             # Start backend on a different port to avoid conflict with main API server
             # Use port 8001 for deployed backends, or check for available port
             backend_port = os.getenv("DEPLOYED_BACKEND_PORT", "8001")
             logger.info(f"[Deployer] Starting backend service on port {backend_port}")
-            backend_cmd = ["uvicorn", "app:app", "--reload", "--host", "0.0.0.0", "--port", backend_port]
+            # Use python -m uvicorn instead of direct uvicorn command
+            backend_cmd = ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", backend_port]
             self.backend_proc = subprocess.Popen(backend_cmd, cwd=backend_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             await asyncio.sleep(2)
             if self.backend_proc.poll() is not None:

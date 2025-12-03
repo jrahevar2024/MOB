@@ -9,7 +9,6 @@ function LoginPage({ onLogin }) {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
-  const [userRole, setUserRole] = useState('user'); // 'user' or 'admin'
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -23,45 +22,34 @@ function LoginPage({ onLogin }) {
       return;
     }
 
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters');
+    // Static credentials validation
+    const validCredentials = {
+      'admin@motherofbots.com': { password: 'admin@123', role: 'admin' },
+      'user@motherofbots.com': { password: 'user@123', role: 'user' }
+    };
+
+    const credentials = validCredentials[username.trim().toLowerCase()];
+    
+    if (!credentials || credentials.password !== password) {
+      setError('Invalid username or password');
       setIsLoading(false);
       return;
     }
 
     // Simulate API call
     setTimeout(() => {
-      // For demo purposes, accept any username/password
-      // In production, you'd validate against your backend
       const user = {
-        username: username,
-        email: `${username}@example.com`,
-        role: userRole, // 'user' or 'admin'
+        username: username.trim().toLowerCase().split('@')[0],
+        email: username.trim().toLowerCase(),
+        role: credentials.role,
         loginTime: new Date().toISOString()
       };
       
       // Store user in localStorage
       localStorage.setItem('user', JSON.stringify(user));
-      localStorage.setItem('authToken', 'demo-token-' + Date.now());
+      localStorage.setItem('authToken', 'auth-token-' + Date.now());
       
       setIsLoading(false);
-      onLogin(user);
-    }, 1000);
-  };
-
-  const handleDemoLogin = (role = 'admin') => {
-    const demoUser = role === 'admin' ? 'admin' : 'demo';
-    setUsername(demoUser);
-    setPassword('demo123');
-    setTimeout(() => {
-      const user = {
-        username: demoUser,
-        email: `${demoUser}@motherofbots.com`,
-        role: role,
-        loginTime: new Date().toISOString()
-      };
-      localStorage.setItem('user', JSON.stringify(user));
-      localStorage.setItem('authToken', 'demo-token-' + Date.now());
       onLogin(user);
     }, 500);
   };
@@ -95,13 +83,13 @@ function LoginPage({ onLogin }) {
           <div className="form-group">
             <label htmlFor="username" className="form-label">
               <User size={18} />
-              Username
+              Email
             </label>
             <input
               id="username"
-              type="text"
+              type="email"
               className="form-input"
-              placeholder="Enter your username"
+              placeholder="admin@motherofbots.com or user@motherofbots.com"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               disabled={isLoading}
@@ -136,22 +124,6 @@ function LoginPage({ onLogin }) {
             </div>
           </div>
 
-          <div className="form-group">
-            <label htmlFor="role" className="form-label">
-              <User size={18} />
-              User Role
-            </label>
-            <select
-              id="role"
-              className="form-input role-select"
-              value={userRole}
-              onChange={(e) => setUserRole(e.target.value)}
-              disabled={isLoading}
-            >
-              <option value="user">Normal User</option>
-              <option value="admin">Administrator</option>
-            </select>
-          </div>
 
           {!isSignUp && (
             <div className="form-footer">
@@ -173,67 +145,17 @@ function LoginPage({ onLogin }) {
             {isLoading ? (
               <span className="loading-spinner">
                 <div className="spinner"></div>
-                {isSignUp ? 'Creating account...' : 'Logging in...'}
+                Logging in...
               </span>
             ) : (
-              isSignUp ? 'Sign Up' : 'Login'
+              'Login'
             )}
           </button>
-
-          <div className="demo-buttons-group">
-            <button
-              type="button"
-              className="demo-button"
-              onClick={() => handleDemoLogin('user')}
-              disabled={isLoading}
-            >
-              <User size={18} />
-              Demo User
-            </button>
-            <button
-              type="button"
-              className="demo-button admin"
-              onClick={() => handleDemoLogin('admin')}
-              disabled={isLoading}
-            >
-              <Bot size={18} />
-              Demo Admin
-            </button>
-          </div>
         </form>
 
-        <div className="login-divider">
-          <span>or</span>
-        </div>
-
-        <div className="signup-prompt">
-          {isSignUp ? (
-            <>
-              Already have an account?{' '}
-              <button
-                className="toggle-mode-btn"
-                onClick={() => {
-                  setIsSignUp(false);
-                  setError('');
-                }}
-              >
-                Login here
-              </button>
-            </>
-          ) : (
-            <>
-              Don't have an account?{' '}
-              <button
-                className="toggle-mode-btn"
-                onClick={() => {
-                  setIsSignUp(true);
-                  setError('');
-                }}
-              >
-                Sign up here
-              </button>
-            </>
-          )}
+        <div className="login-credentials-info">
+          <p><strong>Admin:</strong> admin@motherofbots.com / admin@123</p>
+          <p><strong>User:</strong> user@motherofbots.com / user@123</p>
         </div>
 
         <div className="login-footer">

@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-deployment
+  labels:
+    app: mother-of-bots
+    component: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mother-of-bots
+      component: backend
+  template:
+    metadata:
+      labels:
+        app: mother-of-bots
+        component: backend
+    spec:
+      serviceAccountName: backend-service-account
+      containers:
+      - name: backend
+        image: us-central1-docker.pkg.dev/motherofbots/docker-repo/mother-of-bots-backend:latest
+        ports:
+        - containerPort: 5000
+          name: http
+        env:
+        - name: GCP_PROJECT_ID
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: gcp_project_id
+        - name: GCP_LOCATION
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: gcp_location
+        - name: GEMINI_MODEL
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: gemini_model
+        - name: API_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: api_port
+        - name: GCS_BUCKET_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: gcs_bucket_name
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend-service
+  labels:
+    app: mother-of-bots
+    component: backend
+  annotations:
+    cloud.google.com/backend-config: '{"default": "backend-health-config"}'
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5000
+    targetPort: 5000
+    protocol: TCP
+    name: http
+  selector:
+    app: mother-of-bots
+    component: backend
+

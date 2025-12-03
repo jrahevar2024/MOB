@@ -54,8 +54,8 @@ GCP_PROJECT_ID = os.getenv("GCP_PROJECT_ID", "motherofbots")
 GCP_LOCATION = os.getenv("GCP_LOCATION", "us-central1")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
-# Flask API configuration
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+# Flask API configuration - use same port as Flask API default (5000)
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:5000")
 
 # Setup page config
 st.set_page_config(

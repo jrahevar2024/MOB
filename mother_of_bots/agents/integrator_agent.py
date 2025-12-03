@@ -2,6 +2,7 @@ import logging
 import os
 import json
 from typing import Dict, Any, Optional
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -11,6 +12,14 @@ load_dotenv()
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# GCS configuration
+try:
+    from google.cloud import storage
+    GCS_AVAILABLE = True
+except ImportError:
+    GCS_AVAILABLE = False
+    logger.warning("google-cloud-storage not available. GCS upload will be skipped.")
 
 
 class StandaloneIntegratorAgent:
@@ -33,8 +42,9 @@ class StandaloneIntegratorAgent:
             import uuid
 
             project_name = f"generated_project_{uuid.uuid4().hex[:8]}"
-            project_dir = os.path.join(os.getcwd(), project_name)
-            os.makedirs(project_dir, exist_ok=True)
+            # Use /tmp for writable directory in Kubernetes (always writable)
+            project_dir = os.path.join("/tmp", project_name)
+            os.makedirs(project_dir, mode=0o755, exist_ok=True)
 
             backend_dir = os.path.join(project_dir, "backend")
             frontend_dir = os.path.join(project_dir, "frontend")
@@ -186,11 +196,55 @@ export const apiCall = async (endpoint, method = 'GET', data = null) => {
 """)
             logger.info(f"[Integrator] config.js created at {config_path}")
 
+            # Upload project to GCS bucket
+            gcs_bucket_name = os.getenv("GCS_BUCKET_NAME", "")
+            if gcs_bucket_name and GCS_AVAILABLE:
+                try:
+                    gcs_path = await self._upload_to_gcs(project_dir, project_name, gcs_bucket_name)
+                    logger.info(f"[Integrator] Project uploaded to GCS: {gcs_path}")
+                except Exception as e:
+                    logger.error(f"[Integrator] Failed to upload to GCS: {str(e)}")
+                    # Continue even if GCS upload fails
+            elif gcs_bucket_name and not GCS_AVAILABLE:
+                logger.warning("[Integrator] GCS bucket configured but google-cloud-storage not installed")
+
             logger.info("[Integrator] Project integration complete")
             return project_dir
         except Exception as exc:
             logger.error(f"Error integrating project: {exc}")
             return None
+    
+    async def _upload_to_gcs(self, project_dir: str, project_name: str, bucket_name: str) -> str:
+        """Upload project directory to GCS bucket."""
+        if not GCS_AVAILABLE:
+            raise ImportError("google-cloud-storage is not installed")
+        
+        logger.info(f"[Integrator] Uploading project to GCS bucket: {bucket_name}")
+        
+        # Initialize GCS client
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(bucket_name)
+        
+        # Upload all files in the project directory
+        uploaded_files = []
+        project_path = Path(project_dir)
+        
+        for file_path in project_path.rglob('*'):
+            if file_path.is_file():
+                # Get relative path from project directory
+                relative_path = file_path.relative_to(project_path)
+                # Create blob path: projects/{project_name}/{relative_path}
+                blob_path = f"projects/{project_name}/{relative_path.as_posix()}"
+                
+                # Upload file
+                blob = bucket.blob(blob_path)
+                blob.upload_from_filename(str(file_path))
+                uploaded_files.append(blob_path)
+                logger.debug(f"[Integrator] Uploaded {relative_path} to gs://{bucket_name}/{blob_path}")
+        
+        logger.info(f"[Integrator] Uploaded {len(uploaded_files)} files to GCS")
+        gcs_path = f"gs://{bucket_name}/projects/{project_name}/"
+        return gcs_path
 
     async def start(self):
         logger.info(f"Starting StandaloneIntegratorAgent: {self.name}")
